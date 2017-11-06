@@ -9,7 +9,7 @@ try:
 except ImportError:
     requests = None
 
-from jsonschema import _utils, _validators
+from jsonschema import _utils, _validators, _types
 from jsonschema.compat import (
     Sequence, urljoin, urlsplit, urldefrag, unquote, urlopen,
     str_types, int_types, iteritems, lru_cache,
@@ -56,24 +56,48 @@ def validates(version):
     return _validates
 
 
-def create(meta_schema, validators=(), version=None, default_types=None):
-    if default_types is None:
-        default_types = {
-            u"array": list, u"boolean": bool, u"integer": int_types,
-            u"null": type(None), u"number": numbers.Number, u"object": dict,
-            u"string": str_types,
+def create(meta_schema, validators=(), version=None, default_types=(),
+           type_checks=None):
+
+    # To maintain the old interface, we must check the old default types
+    # in the same manner
+    if type_checks is None:
+        type_checks = {
+            u"array": _types.is_array, u"boolean": _types.is_bool,
+            u"integer": _types.is_integer, u"null": _types.is_null,
+            u"number": _types.is_number, u"object": _types.is_object,
+            u"string": _types.is_string,
         }
 
     class Validator(object):
         VALIDATORS = dict(validators)
         META_SCHEMA = dict(meta_schema)
         DEFAULT_TYPES = dict(default_types)
+        TYPE_CHECKS = dict(type_checks)
 
         def __init__(
             self, schema, types=(), resolver=None, format_checker=None,
         ):
-            self._types = dict(self.DEFAULT_TYPES)
-            self._types.update(types)
+
+            self._types = {}
+            # To maintain the old interface, if types or default types are
+            # provided, we must respect them and check them in the same
+            # manner.
+            if default_types or types:
+                from warnings import warn
+                warn("Use of default types is deprecated", DeprecationWarning)
+
+                if default_types:
+                    self._types = dict(default_types)
+                else:
+                    self._types = {
+                        u"array": list, u"boolean": bool, u"integer": int_types,
+                        u"null": type(None), u"number": numbers.Number,
+                        u"object": dict,
+                        u"string": str_types,
+                    }
+
+                self._types.update(types)
 
             if resolver is None:
                 if schema is True:
@@ -145,15 +169,21 @@ def create(meta_schema, validators=(), version=None, default_types=None):
                 raise error
 
         def is_type(self, instance, type):
+            if self._types:
+                return self._deprecated_type_check(instance, type)
+
+            if type not in self.TYPE_CHECKS:
+                raise UnknownType(type, instance, self.schema)
+
+            return self.TYPE_CHECKS[type](instance)
+
+        def _deprecated_type_check(self, instance, type):
             if type not in self._types:
                 raise UnknownType(type, instance, self.schema)
             pytypes = self._types[type]
 
-            # FIXME: draft < 6
-            if isinstance(instance, float) and type == "integer":
-                return instance.is_integer()
             # bool inherits from int, so ensure bools aren't reported as ints
-            elif isinstance(instance, bool):
+            if isinstance(instance, bool):
                 pytypes = _utils.flatten(pytypes)
                 is_number = any(
                     issubclass(pytype, numbers.Number) for pytype in pytypes
@@ -173,16 +203,19 @@ def create(meta_schema, validators=(), version=None, default_types=None):
     return Validator
 
 
-def extend(validator, validators, version=None):
+def extend(validator, validators=(), version=None, type_checks=()):
     all_validators = dict(validator.VALIDATORS)
     all_validators.update(validators)
+    all_type_checks = validator.TYPE_CHECKS
+    all_type_checks.update(type_checks)
+
     return create(
         meta_schema=validator.META_SCHEMA,
         validators=all_validators,
         version=version,
         default_types=validator.DEFAULT_TYPES,
+        type_checks=all_type_checks
     )
-
 
 Draft3Validator = create(
     meta_schema=_utils.load_schema("draft3"),
@@ -209,6 +242,16 @@ Draft3Validator = create(
         u"properties": _validators.properties_draft3,
         u"type": _validators.type_draft3,
         u"uniqueItems": _validators.uniqueItems,
+    },
+    type_checks={
+        u"any": _types.is_any,
+        u"array": _types.is_array,
+        u"boolean": _types.is_bool,
+        u"integer": _types.is_integer,
+        u"object": _types.is_object,
+        u"null": _types.is_null,
+        u"number": _types.is_number,
+        u"string": _types.is_string,
     },
     version="draft3",
 )
@@ -242,6 +285,15 @@ Draft4Validator = create(
         u"required": _validators.required,
         u"type": _validators.type,
         u"uniqueItems": _validators.uniqueItems,
+    },
+    type_checks={
+        u"array": _types.is_array,
+        u"boolean": _types.is_bool,
+        u"integer": _types.is_integer,
+        u"object": _types.is_object,
+        u"null": _types.is_null,
+        u"number": _types.is_number,
+        u"string": _types.is_string,
     },
     version="draft4",
 )
@@ -281,6 +333,15 @@ Draft6Validator = create(
         u"required": _validators.required,
         u"type": _validators.type,
         u"uniqueItems": _validators.uniqueItems,
+    },
+    type_checks={
+        u"array": _types.is_array,
+        u"boolean": _types.is_bool,
+        u"integer": _types.is_integer_draft6,
+        u"object": _types.is_object,
+        u"null": _types.is_null,
+        u"number": _types.is_number,
+        u"string": _types.is_string,
     },
     version="draft6",
 )
