@@ -14,7 +14,9 @@ from jsonschema.compat import (
     Sequence, urljoin, urlsplit, urldefrag, unquote, urlopen,
     str_types, int_types, iteritems, lru_cache,
 )
-from jsonschema.exceptions import RefResolutionError, SchemaError, UnknownType
+from jsonschema.exceptions import (
+    RefResolutionError, SchemaError, UnknownType, UnknownTypeName
+)
 
 # Sigh. https://gitlab.com/pycqa/flake8/issues/280
 #       https://github.com/pyga/ebb-lint/issues/7
@@ -57,47 +59,38 @@ def validates(version):
 
 
 def create(meta_schema, validators=(), version=None, default_types=(),
-           type_checks=None):
+           type_checker=_types.TypeChecker()):
 
-    # To maintain the old interface, we must check the old default types
-    # in the same manner
-    if type_checks is None:
-        type_checks = {
-            u"array": _types.is_array, u"boolean": _types.is_bool,
-            u"integer": _types.is_integer, u"null": _types.is_null,
-            u"number": _types.is_number, u"object": _types.is_object,
-            u"string": _types.is_string,
-        }
 
     class Validator(object):
         VALIDATORS = dict(validators)
         META_SCHEMA = dict(meta_schema)
         DEFAULT_TYPES = dict(default_types)
-        TYPE_CHECKS = dict(type_checks)
+        TYPE_CHECKER=type_checker
+
 
         def __init__(
-            self, schema, types=(), resolver=None, format_checker=None,
+            self, schema, types=None, resolver=None, format_checker=None,
+                type_checker=None
         ):
 
-            self._types = {}
+            self.type_checker = type_checker
+            if not type_checker:
+                self.type_checker = self.TYPE_CHECKER
+
             # To maintain the old interface, if types or default types are
             # provided, we must respect them and check them in the same
             # manner.
-            if default_types or types:
+            if self.DEFAULT_TYPES or types:
                 from warnings import warn
                 warn("Use of default types is deprecated", DeprecationWarning)
 
-                if default_types:
-                    self._types = dict(default_types)
-                else:
-                    self._types = {
-                        u"array": list, u"boolean": bool, u"integer": int_types,
-                        u"null": type(None), u"number": numbers.Number,
-                        u"object": dict,
-                        u"string": str_types,
-                    }
+                if self.DEFAULT_TYPES:
+                    self.type_checker = self.type_checker.redefine(
+                        **self.DEFAULT_TYPES)
 
-                self._types.update(types)
+                if types:
+                    self.type_checker = self.type_checker.redefine(**types)
 
             if resolver is None:
                 if schema is True:
@@ -169,28 +162,10 @@ def create(meta_schema, validators=(), version=None, default_types=(),
                 raise error
 
         def is_type(self, instance, type):
-            if self._types:
-                return self._deprecated_type_check(instance, type)
-
-            if type not in self.TYPE_CHECKS:
+            try:
+                return self.type_checker.is_type(instance, type)
+            except UnknownTypeName:
                 raise UnknownType(type, instance, self.schema)
-
-            return self.TYPE_CHECKS[type](instance)
-
-        def _deprecated_type_check(self, instance, type):
-            if type not in self._types:
-                raise UnknownType(type, instance, self.schema)
-            pytypes = self._types[type]
-
-            # bool inherits from int, so ensure bools aren't reported as ints
-            if isinstance(instance, bool):
-                pytypes = _utils.flatten(pytypes)
-                is_number = any(
-                    issubclass(pytype, numbers.Number) for pytype in pytypes
-                )
-                if is_number and bool not in pytypes:
-                    return False
-            return isinstance(instance, pytypes)
 
         def is_valid(self, instance, _schema=None):
             error = next(self.iter_errors(instance, _schema), None)
@@ -203,18 +178,19 @@ def create(meta_schema, validators=(), version=None, default_types=(),
     return Validator
 
 
-def extend(validator, validators=(), version=None, type_checks=()):
+def extend(validator, validators=(), version=None, type_checker=None):
     all_validators = dict(validator.VALIDATORS)
     all_validators.update(validators)
-    all_type_checks = validator.TYPE_CHECKS
-    all_type_checks.update(type_checks)
+
+    if not type_checker:
+        type_checker = validator.TYPE_CHECKER
 
     return create(
         meta_schema=validator.META_SCHEMA,
         validators=all_validators,
         version=version,
         default_types=validator.DEFAULT_TYPES,
-        type_checks=all_type_checks
+        type_checker=type_checker
     )
 
 Draft3Validator = create(
@@ -243,16 +219,7 @@ Draft3Validator = create(
         u"type": _validators.type_draft3,
         u"uniqueItems": _validators.uniqueItems,
     },
-    type_checks={
-        u"any": _types.is_any,
-        u"array": _types.is_array,
-        u"boolean": _types.is_bool,
-        u"integer": _types.is_integer,
-        u"object": _types.is_object,
-        u"null": _types.is_null,
-        u"number": _types.is_number,
-        u"string": _types.is_string,
-    },
+    type_checker=_types.draft3_type_checker,
     version="draft3",
 )
 
@@ -286,15 +253,7 @@ Draft4Validator = create(
         u"type": _validators.type,
         u"uniqueItems": _validators.uniqueItems,
     },
-    type_checks={
-        u"array": _types.is_array,
-        u"boolean": _types.is_bool,
-        u"integer": _types.is_integer,
-        u"object": _types.is_object,
-        u"null": _types.is_null,
-        u"number": _types.is_number,
-        u"string": _types.is_string,
-    },
+    type_checker=_types.draft4_type_checker,
     version="draft4",
 )
 
@@ -334,15 +293,7 @@ Draft6Validator = create(
         u"type": _validators.type,
         u"uniqueItems": _validators.uniqueItems,
     },
-    type_checks={
-        u"array": _types.is_array,
-        u"boolean": _types.is_bool,
-        u"integer": _types.is_integer_draft6,
-        u"object": _types.is_object,
-        u"null": _types.is_null,
-        u"number": _types.is_number,
-        u"string": _types.is_string,
-    },
+    type_checker=_types.draft6_type_checker,
     version="draft6",
 )
 

@@ -10,10 +10,10 @@ from jsonschema.validators import Draft6Validator, extend
 
 
 def type_ints_or_string_ints(instance):
-    if _types.is_integer(instance):
+    if Draft6Validator.TYPE_CHECKER.is_type(instance, "integer"):
         return True
 
-    if _types.is_string(instance):
+    if Draft6Validator.TYPE_CHECKER.is_type(instance, "string"):
         try:
             int(instance)
             return True
@@ -31,7 +31,7 @@ def is_namedtuple(instance):
 
 
 def type_object_allow_namedtuples(instance):
-    if _types.is_object(instance):
+    if Draft6Validator.TYPE_CHECKER.is_type(instance, "object"):
         return True
 
     if is_namedtuple(instance):
@@ -56,10 +56,10 @@ class TestCustomTypes(TestCase):
     def test_simple_type_can_be_extended(self):
         schema = {'type': 'integer'}
 
-        CustomValidator = extend(Draft6Validator,
-                   type_checks={"integer": type_ints_or_string_ints})
+        type_checker = Draft6Validator.TYPE_CHECKER.redefine(
+            integer=type_ints_or_string_ints)
 
-        v = CustomValidator(schema)
+        v = Draft6Validator(schema, type_checker=type_checker)
         v.validate(4)
         v.validate('4')
 
@@ -71,22 +71,20 @@ class TestCustomTypes(TestCase):
 
         Point = namedtuple('Point', ['x', 'y'])
 
-        CustomValidator = extend(Draft6Validator,
-                                 type_checks={
-                                     "object": type_object_allow_namedtuples})
+        type_checker = Draft6Validator.TYPE_CHECKER.redefine(
+            object=type_object_allow_namedtuples)
 
-        v = CustomValidator(schema)
+        v = Draft6Validator(schema, type_checker=type_checker)
         v.validate(Point(x=4, y=5))
 
     def test_object_extensions_require_custom_validators(self):
         schema = {'type': 'object', 'required': ['x']}
 
-        CustomValidator = extend(Draft6Validator,
-                                 type_checks={
-                                     "object":
-                                         type_object_allow_namedtuples})
+        type_checker = Draft6Validator.TYPE_CHECKER.redefine(
+            object=type_object_allow_namedtuples)
 
-        v = CustomValidator(schema)
+        v = Draft6Validator(schema, type_checker=type_checker)
+
         Point = namedtuple('Point', ['x', 'y'])
         # Cannot handle required
         with self.assertRaises(ValidationError):
@@ -100,10 +98,10 @@ class TestCustomTypes(TestCase):
                                  }
                   }
 
+        type_checker = Draft6Validator.TYPE_CHECKER.redefine(
+            object=type_object_allow_namedtuples)
         CustomValidator = extend(Draft6Validator,
-                                 type_checks={
-                                     "object":
-                                         type_object_allow_namedtuples},
+                                 type_checker=type_checker,
                                  validators={"required": required,
                                              'properties': properties})
 
