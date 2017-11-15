@@ -3,6 +3,7 @@ from __future__ import division
 import contextlib
 import json
 import numbers
+from warnings import warn
 
 try:
     import requests
@@ -59,38 +60,40 @@ def validates(version):
 
 
 def create(meta_schema, validators=(), version=None, default_types=(),
-           type_checker=_types.TypeChecker()):
+           type_checker=None):
 
+    if not default_types and not type_checker:
+        warn("default_types is deprecated", DeprecationWarning)
+        default_types = {
+            u"array": list, u"boolean": bool, u"integer": int_types,
+            u"null": type(None), u"number": numbers.Number, u"object": dict,
+            u"string": str_types,
+        }
+
+    if type_checker is None:
+        type_checker = _types.TypeChecker()
+        if default_types:
+            type_checker.update(redefine=default_types)
 
     class Validator(object):
         VALIDATORS = dict(validators)
         META_SCHEMA = dict(meta_schema)
         DEFAULT_TYPES = dict(default_types)
-        TYPE_CHECKER=type_checker
+        TYPE_CHECKER = type_checker
 
 
         def __init__(
-            self, schema, types=None, resolver=None, format_checker=None,
+            self, schema, types=(), resolver=None, format_checker=None,
                 type_checker=None
         ):
 
             self.type_checker = type_checker
-            if not type_checker:
+            if type_checker is None:
                 self.type_checker = self.TYPE_CHECKER
 
-            # To maintain the old interface, if types or default types are
-            # provided, we must respect them and check them in the same
-            # manner.
-            if self.DEFAULT_TYPES or types:
-                from warnings import warn
-                warn("Use of default types is deprecated", DeprecationWarning)
-
-                if self.DEFAULT_TYPES:
-                    self.type_checker = self.type_checker.redefine(
-                        **self.DEFAULT_TYPES)
-
-                if types:
-                    self.type_checker = self.type_checker.redefine(**types)
+            if types:
+                warn("The use of types is deprecated", DeprecationWarning)
+                self.type_checker = self.type_checker.update(redefine=types)
 
             if resolver is None:
                 if schema is True:

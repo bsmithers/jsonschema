@@ -66,10 +66,19 @@ class TypeChecker(object):
 
         return function_or_type(instance)
 
-    def redefine(self, **type_changes):
+    def update(self, redefine=(), remove=()):
+        redefine = dict(redefine)
         evolver = self.type_checkers.evolver()
-        for type_, checker in iteritems(type_changes):
+
+        for type_, checker in iteritems(redefine):
             evolver[type_] = checker
+
+        for type_ in remove:
+            try:
+                del evolver[type_]
+            except KeyError:
+                raise UnknownTypeName
+
         return attr.evolve(self, type_checkers=evolver.persistent())
 
     def _deprecated_type_check(self, instance, pytypes):
@@ -85,27 +94,19 @@ class TypeChecker(object):
         return isinstance(instance, pytypes)
 
 
-draft3_type_checker = TypeChecker().redefine(
-    any=is_any,
-    array=is_array,
-    boolean=is_bool,
-    integer=is_integer,
-    object=is_object,
-    null=is_null,
-    number=is_number,
-    string=is_string,
-)
+draft3_type_checker = TypeChecker().update(redefine={
+    u"any": is_any,
+    u"array": is_array,
+    u"boolean": is_bool,
+    u"integer": is_integer,
+    u"object": is_object,
+    u"null": is_null,
+    u"number": is_number,
+    u"string": is_string
+})
 
-draft4_type_checker = TypeChecker().redefine(
-    array=is_array,
-    boolean=is_bool,
-    integer=is_integer,
-    object=is_object,
-    null=is_null,
-    number=is_number,
-    string=is_string,
-)
+draft4_type_checker = draft3_type_checker.update(remove={u"any"})
 
-draft6_type_checker = draft4_type_checker.redefine(
-    integer=is_integer_draft6
-)
+draft6_type_checker = draft4_type_checker.update(redefine={
+    u"integer": is_integer_draft6
+})
