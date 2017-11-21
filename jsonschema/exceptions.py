@@ -140,7 +140,7 @@ class RefResolutionError(Exception):
     pass
 
 
-class UnknownTypeName(Exception):
+class UndefinedTypeCheck(Exception):
     pass
 
 class UnknownType(Exception):

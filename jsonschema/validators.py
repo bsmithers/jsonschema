@@ -16,7 +16,7 @@ from jsonschema.compat import (
     str_types, int_types, iteritems, lru_cache,
 )
 from jsonschema.exceptions import (
-    RefResolutionError, SchemaError, UnknownType, UnknownTypeName
+    RefResolutionError, SchemaError, UnknownType, UndefinedTypeCheck
 )
 
 # Sigh. https://gitlab.com/pycqa/flake8/issues/280
@@ -59,11 +59,49 @@ def validates(version):
     return _validates
 
 
+def _generate_legacy_type_checks(types=()):
+    """
+    Generate type check definitions suitable for TypeChecker.redefine_many,
+    using the supplied types. Type Checks are simple isinstance checks,
+    except checking that numbers aren't really bools.
+
+    Arguments:
+
+        types (dict):
+
+            A mapping of type names to their Python Types
+
+    Returns:
+
+        A dictionary of definitions to pass to TypeChecker
+
+    """
+    types = dict(types)
+
+    def gen_type_check(pytypes):
+        pytypes = _utils.flatten(pytypes)
+
+        def type_check(instance):
+            if isinstance(instance, bool):
+                if bool not in pytypes:
+                    return False
+            return isinstance(instance, pytypes)
+
+        return type_check
+
+    definitions = {}
+    for typename, pytypes in iteritems(types):
+        definitions[typename] = gen_type_check(pytypes)
+
+    return definitions
+
+
 def create(meta_schema, validators=(), version=None, default_types=(),
            type_checker=None):
 
     if not default_types and not type_checker:
-        warn("default_types is deprecated", DeprecationWarning)
+        warn("default_types is deprecated, use type_checker",
+             DeprecationWarning)
         default_types = {
             u"array": list, u"boolean": bool, u"integer": int_types,
             u"null": type(None), u"number": numbers.Number, u"object": dict,
@@ -72,8 +110,10 @@ def create(meta_schema, validators=(), version=None, default_types=(),
 
     if type_checker is None:
         type_checker = _types.TypeChecker()
-        if default_types:
-            type_checker.update(redefine=default_types)
+
+    type_checker = type_checker.redefine_many(
+        _generate_legacy_type_checks(default_types))
+
 
     class Validator(object):
         VALIDATORS = dict(validators)
@@ -83,17 +123,16 @@ def create(meta_schema, validators=(), version=None, default_types=(),
 
 
         def __init__(
-            self, schema, types=(), resolver=None, format_checker=None,
-                type_checker=None
-        ):
-
-            self.type_checker = type_checker
-            if type_checker is None:
-                self.type_checker = self.TYPE_CHECKER
+            self, schema, types=(), resolver=None, format_checker=None):
 
             if types:
-                warn("The use of types is deprecated", DeprecationWarning)
-                self.type_checker = self.type_checker.update(redefine=types)
+                warn("The use of types is deprecated, use type_checker in "
+                     "create",
+                     DeprecationWarning)
+
+            self.type_checker = self.TYPE_CHECKER.redefine_many(
+                _generate_legacy_type_checks(types))
+
 
             if resolver is None:
                 if schema is True:
@@ -167,7 +206,7 @@ def create(meta_schema, validators=(), version=None, default_types=(),
         def is_type(self, instance, type):
             try:
                 return self.type_checker.is_type(instance, type)
-            except UnknownTypeName:
+            except UndefinedTypeCheck:
                 raise UnknownType(type, instance, self.schema)
 
         def is_valid(self, instance, _schema=None):
