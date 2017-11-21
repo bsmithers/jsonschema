@@ -31,6 +31,7 @@ from jsonschema import (
 )
 from jsonschema.compat import PY3
 from jsonschema.tests.compat import mock
+from jsonschema.validators import create
 import jsonschema
 
 
@@ -351,3 +352,19 @@ class Draft4RemoteResolution(RemoteRefResolutionMixin, unittest.TestCase):
 )
 class Draft6RemoteResolution(RemoteRefResolutionMixin, unittest.TestCase):
     validator_class = Draft6Validator
+
+
+@load_json_cases("draft3/type.json")
+class TestDraft3LegacyTypeCheck(unittest.TestCase):
+    Validator = create(meta_schema=Draft3Validator.META_SCHEMA,
+                       validators=Draft3Validator.VALIDATORS,
+                       type_checker=None)
+    validator_class = Validator
+
+
+@load_json_cases("draft4/type.json")
+class TestDraft4LegacyTypeCheck(unittest.TestCase):
+    Validator = create(meta_schema=Draft4Validator.META_SCHEMA,
+                       validators=Draft4Validator.VALIDATORS,
+                       type_checker=None)
+    validator_class = Validator
